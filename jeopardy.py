@@ -20,7 +20,7 @@ board_matrix=[
 q={}
 def get_questions():
     # fileName = input('Enter Question File Name:')
-    fileName = 'qset4_Book'
+    fileName = 'qset1'
     df = pd.read_csv(fileName+'.csv',header=0)
     for i,row in enumerate(df['Row']):
             question = str(df["Question"][i])
