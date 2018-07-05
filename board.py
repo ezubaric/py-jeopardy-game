@@ -67,4 +67,5 @@ class Pane(object):
 
 
 if __name__ == "__main__":
-    pane1= Pane()
+    pane = Pane()
+    pane.draw_grid()
