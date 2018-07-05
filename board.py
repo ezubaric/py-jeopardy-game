@@ -15,7 +15,9 @@ class Pane(object):
         self.questions = pd.read_csv('%s.csv' % file,header=0)
 
         with open(file, 'r') as infile_handle:
-            infile = 
+            infile = DictReader(infile_handle)
+            for ii in infile:
+                
         
     def draw_grid(self):
         if self.draw_grid_flag:
