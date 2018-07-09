@@ -12,6 +12,9 @@ kCOLORS["yellow"] = (255,255,0)
 kCOLORS["red"] = (255, 0, 0)
 kCOLORS["black"] = (0, 0, 0)
 
+kTIMER_EVENT = pygame.USEREVENT + 1
+kKEYBOARD_EVENTS = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6]
+
 kMONEY = {1: [200, 400, 600, 800, 1000],
           2: [400, 800, 1200, 1600, 2000]}
 kNUM_ROWS = len(kMONEY[1])
@@ -131,24 +134,34 @@ class Pane(object):
 
         os.system('say "%s"' % self.board[x][y]["clue"].replace('"', ''))
 
-        sleep(random())
-        keys=pygame.key.get_pressed()
-        print(keys)
-        
-        self.screen.fill((kCOLORS["yellow"]))
-        pygame.display.update()
-        
-        char = "q"
-        while char not in " 1234567890":
-            char = getch()
-            print("Keypress: %s" % char)
+        # time_delta = int(random() * 1000)
+        time_delta = 500
+        pygame.time.set_timer(kTIMER_EVENT, time_delta)
 
-        if char == " ":
-            return -1
-        else:
-            os.system("say 'Player %s'" % char)
-            return int(char)
-
+        too_early = True
+        locked_out = set()
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key in kKEYBOARD_EVENTS:
+                    if too_early:
+                        locked_out.add(kKEYBOARD_EVENTS.index(event.key) + 1)
+                        print("Locked out: ", locked_out)
+                    else:
+                        player = kKEYBOARD_EVENTS.index(event.key) + 1
+                        if player in locked_out:
+                            continue
+                        else:
+                            pygame.time.set_timer(kTIMER_EVENT, 0)
+                            return player
+            if event.type == kTIMER_EVENT:
+                if too_early:
+                    too_early = False
+                    self.screen.fill((kCOLORS["yellow"]))
+                    pygame.display.update()                    
+                    pygame.time.set_timer(kTIMER_EVENT, 3000)
+                else:
+                    pygame.time.set_timer(kTIMER_EVENT, 0)
+                    return -1
 
         
     def clues_left(self):
