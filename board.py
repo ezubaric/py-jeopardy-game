@@ -1,6 +1,7 @@
 import pygame
 import textwrap
 import os
+import time
 from random import random
 from collections import defaultdict
 
@@ -13,53 +14,29 @@ kCOLORS["red"] = (255, 0, 0)
 kCOLORS["black"] = (0, 0, 0)
 
 kTIMER_EVENT = pygame.USEREVENT + 1
-kKEYBOARD_EVENTS = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6]
+kKEYBOARD_NUMBERS = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6]
+kKEYBOARD_LETTERS = [pygame.K_a, pygame.K_b, pygame.K_c, pygame.K_d, pygame.K_e, pygame.K_f]
+kKEYBOARD_CORRECT = [pygame.K_n, 269, pygame.K_y, 270]
+kCORRECT_MAP = [-1, -1, 1, 1]
+kCOLUMN_LETTERS = "ABCDEF"
 
 kMONEY = {1: [200, 400, 600, 800, 1000],
           2: [400, 800, 1200, 1600, 2000]}
 kNUM_ROWS = len(kMONEY[1])
-kCOLUMN_LETTERS = "ABCDEF"
 
-
-# Utilities for single character input
-class _Getch:
-    """Gets a single character from standard input.  Does not echo to the
-screen."""
-    def __init__(self):
-        try:
-            self.impl = _GetchWindows()
-        except ImportError:
-            self.impl = _GetchUnix()
-
-    def __call__(self): return self.impl()
-
-
-class _GetchUnix:
-    def __init__(self):
-        import tty, sys
-
-    def __call__(self):
-        import sys, tty, termios
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(sys.stdin.fileno())
-            ch = sys.stdin.read(1)
-            sys.stdin.flush()
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        return ch
-
-
-class _GetchWindows:
-    def __init__(self):
-        import msvcrt
-
-    def __call__(self):
-        import msvcrt
-        return msvcrt.getch()
-
-getch = _Getch()
+def keypress(valid = []):
+    input_needed = True
+    while input_needed:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                print("Got keypress %i, %s" % (event.key, str(list(int(x) for x in valid))))
+                if event.key in valid:
+                    input_needed = False
+                else:
+                    pygame.mixer.music.load('invalid.wav')
+                    pygame.mixer.music.play(0)                    
+    return valid.index(event.key)
+        
 
 
 def game_loop(scores):
@@ -67,19 +44,28 @@ def game_loop(scores):
     pane = Pane()
     pane.draw_grid(scores, 1)
     pane.load_questions("study.csv")
-    pane.start_round(1)
-    pane.display_text()
-    while pane.clues_left() > 0:
-        question = pane.get_clue()
-        print("Selection", question)
-        print("Category", pane.categories[question[0]])
-        player = pane.buzz(question)
-        print(kMONEY, question[1], question)
-        scores = pane.result(scores, player, pane.board_values[question[1]], question)
+    player = 1
+    for round in [1, 2]:
 
-        pane.draw_grid(scores, player)
+        pane.start_round(player)
+        doubles = pane.pick_dd(round)        
         pane.display_text()
-        
+        while pane.clues_left() > 0:
+            question = pane.get_clue()
+            print("Selection", question)
+            print("Category", pane.categories[question[0]])
+            if question in doubles:
+                scores = pane.daily_double(question, player, scores)
+            else:
+                player = pane.buzz(question)
+                scores = pane.result(scores, player, pane.board_values[question[1]], question)
+           
+            pane.draw_grid(scores, player)
+            pane.display_text()
+            print("Clues left: %i" % pane.clues_left())
+            print(doubles)
+            
+    pane.start_final(scores)
 
 
 class Pane(object):
@@ -103,84 +89,143 @@ class Pane(object):
         self.draw_grid_flag=True
         pygame.display.update()
 
+    def daily_double(self, question, player, scores):
+        self.audio("dd")
+        x, y = question
+
+        wager = -1
+        while wager < 0:
+            wager = input("Wager: ")
+            try:
+                wager = int(wager)
+            except ValueError:
+                wager = -1
+
+        self.screen_fill(self.board[x][y]["clue"])
+        return self.result(scores, player, wager, question)
+
+    def audio(self, filename):
+        pygame.mixer.music.load('%s.wav' % filename)
+        pygame.mixer.music.play(0)
+            
+    def pick_dd(self, needed):
+        from random import choice
+        doubles = []
+        while needed > 0:
+            x = choice(list(range(1, self.num_columns)))
+            y = choice(list(range(3, kNUM_ROWS)))
+            if self.board[x][y] is not None:
+                doubles.append((x, y))
+                needed -= 1
+        return doubles
+        
     def result(self, score, player, value, question):
         x, y = question
         
         print("Answer: %s" % self.board[x][y]["answer"])
-        char = " "
-        while char not in "+-":
-            char = getch()
-        if char == "+":
-            score[player] += value
-        elif char == "-":
-            score[player] -= value
+        if player > 0:
+            correct = keypress(kKEYBOARD_CORRECT)
+            score[player] += kCORRECT_MAP[correct] * value
+        else:
+            self.audio("time")
+            os.system('say "%s"' % self.board[x][y]["answer"].replace('"', ''))
 
         self.board[x][y] = None
             
         return score
 
-    def buzz(self, question):
+    def start_final(self, scores):
+        from random import choice
+        category = choice(list(self.questions[3].keys()))
+        question = choice(list(self.questions[3][category]))
+        question = self.questions[3][category][question]
+
+        self.screen_fill(category)
+        pygame.time.wait(10000)
+        self.screen_fill(question["clue"])
+        self.audio('Jeopardy_Music')
+        pygame.time.wait(30000)
+        self.screen_fill(question["answer"])
+        print(scores)
+
+    def screen_fill(self, text):
         self.screen.fill((kCOLORS["blue"]))
-        x, y = question
         pygame.display.update()
 
         font = pygame.font.SysFont("times", 50)
         row = 0
-        for ii in textwrap.wrap(self.board[x][y]["clue"], 40):
+        for ii in textwrap.wrap(text, 40):
             row += 1
-            text = font.render(ii, True, kCOLORS["white"])
-            self.screen.blit(text, (.5 * self.width // self.num_columns, self.row_height * row))
+            line = font.render(ii, True, kCOLORS["white"])
+            self.screen.blit(line, (.5 * self.width // self.num_columns, self.row_height * row))
         pygame.display.update()
 
-        os.system('say "%s"' % self.board[x][y]["clue"].replace('"', ''))
-
+        os.system('say "%s"' % text.replace('"', ''))
+        
+    def buzz(self, question):
+        x, y = question
+        self.screen_fill(self.board[x][y]["clue"])
+                             
         # time_delta = int(random() * 1000)
         time_delta = 500
         pygame.time.set_timer(kTIMER_EVENT, time_delta)
 
         too_early = True
         locked_out = set()
-        for event in pygame.event.get():
-            if event.type == pygame.KEYDOWN:
-                if event.key in kKEYBOARD_EVENTS:
-                    if too_early:
-                        locked_out.add(kKEYBOARD_EVENTS.index(event.key) + 1)
-                        print("Locked out: ", locked_out)
-                    else:
-                        player = kKEYBOARD_EVENTS.index(event.key) + 1
-                        if player in locked_out:
-                            continue
+        while True:
+            for event in pygame.event.get():
+                print("Got event!: " + str(event.type))
+                if event.type == pygame.KEYDOWN:
+                    if event.key in kKEYBOARD_NUMBERS:
+                        if too_early:
+                            locked_out.add(kKEYBOARD_NUMBERS.index(event.key) + 1)
+                            print("Locked out: ", locked_out)
                         else:
-                            pygame.time.set_timer(kTIMER_EVENT, 0)
-                            return player
-            if event.type == kTIMER_EVENT:
-                if too_early:
-                    too_early = False
-                    self.screen.fill((kCOLORS["yellow"]))
-                    pygame.display.update()                    
-                    pygame.time.set_timer(kTIMER_EVENT, 3000)
-                else:
-                    pygame.time.set_timer(kTIMER_EVENT, 0)
-                    return -1
+                            player = kKEYBOARD_NUMBERS.index(event.key) + 1
+                            if player in locked_out:
+                                continue
+                            else:
+                                pygame.time.set_timer(kTIMER_EVENT, 0)
+                                now = time.time()
+                                elapsed = int((now - go_time) * 1000)
+                                print(go_time, elapsed, now)
+                                self.audio("ring")
+                                self.screen.fill((kCOLORS["black"]))
+                                pygame.display.update()                                
+                                os.system('say "Player %i, %i ms"' % (player, elapsed))
+                                return player
+                if event.type == kTIMER_EVENT:
+                    if too_early:
+                        print("Go time!")
+                        too_early = False
+                        go_time = time.time()
+                        self.screen.fill((kCOLORS["yellow"]))
+                        pygame.display.update()                    
+                        pygame.time.set_timer(kTIMER_EVENT, 3000)
+                    else:
+                        print("No buzz")
+                        pygame.time.set_timer(kTIMER_EVENT, 0)
+
+                        return -1
+        print("Exiting buzz")
 
         
     def clues_left(self):
         return sum(1 for x in self.board if self.board[x] is not None)
 
     def get_clue(self):
-        square = input("Select a square:")
-        while len(square) != 2 or square[0] not in kCOLUMN_LETTERS or int(square[1]) not in range(1, 7):
-            square = input("Select a square:")
+        print("Select column")
+        x = keypress(kKEYBOARD_LETTERS)
+        print("Select row")
+        y = keypress(kKEYBOARD_NUMBERS)
 
-        
-        x = kCOLUMN_LETTERS.index(square[0])
-        y = int(square[1]) - 1
         if x not in self.board or y not in self.board[x] or self.board[x][y] is None:
             return self.get_clue()
         else:
             return x, y
         
     def start_round(self, round):
+        self.audio("board")
         from random import sample
         self.board_values = kMONEY[round]
         print("Using board", self.board_values)
